@@ -213,6 +213,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_drillholes(qs)
             if route == "/api/reports":
                 return self._api_reports(qs)
+            if route == "/api/expired":
+                return self._api_expired(qs)
             if route == "/api/snipe":
                 return self._api_snipe(qs)
             if route == "/api/geocode":
@@ -400,6 +402,52 @@ class Handler(BaseHTTPRequestHandler):
                     "operator": a.get("Operator"),
                     "permit": a.get("Permit"),
                     "region": a.get("Region"),
+                    "start_date": ms_to_iso(a.get("Start_Date")),
+                    "end_date": ms_to_iso(a.get("End_Date")),
+                    "open_file": a.get("Open_File"),
+                },
+            })
+        self._send_json({"type": "FeatureCollection", "features": features})
+
+    def _api_expired(self, qs):
+        """Relinquished / surrendered historic permit areas.
+
+        NZP&M's public service does not publish expired permit boundaries, but
+        relinquishment / surrender / final reports carry the permit number,
+        end date AND the boundary polygon of the ground that was given up -
+        i.e. previously-permitted land that is now (or recently) open.
+        """
+        bbox = qs.get("bbox", [None])[0]
+        commodity = (qs.get("commodity", ["Gold"])[0]).strip()
+        clauses = [("(Title LIKE '%elinquish%' OR Title LIKE '%urrender%' "
+                    "OR Title LIKE '%Final Report%' OR Type LIKE '%elinquish%')")]
+        if commodity and commodity.lower() != "all":
+            clauses.append(f"Commodity LIKE '%{like(commodity)}%'")
+        params = {
+            "where": " AND ".join(clauses),
+            "outFields": ("Report_ID,Title,Author,Summary,Commodity,Operator,"
+                          "Permit,Region,Start_Date,End_Date,Open_File,Type"),
+            "resultRecordCount": qs.get("limit", ["1000"])[0],
+        }
+        params.update(envelope(bbox))
+        data = arcgis_query(GEODATA_FS, L_REPORTS, params)
+        features = []
+        for f in data.get("features", []):
+            a = f["attributes"]
+            geom = esri_polygon_to_geojson(f.get("geometry"))
+            if not geom:
+                continue
+            features.append({
+                "type": "Feature", "geometry": geom,
+                "properties": {
+                    "report_id": a.get("Report_ID"),
+                    "title": a.get("Title"),
+                    "permit": a.get("Permit"),
+                    "commodity": a.get("Commodity"),
+                    "operator": a.get("Operator"),
+                    "region": a.get("Region"),
+                    "type": a.get("Type"),
+                    "summary": a.get("Summary"),
                     "start_date": ms_to_iso(a.get("Start_Date")),
                     "end_date": ms_to_iso(a.get("End_Date")),
                     "open_file": a.get("Open_File"),

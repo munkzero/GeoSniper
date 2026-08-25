@@ -25,6 +25,7 @@ L.tileLayer(
 const layers = {
   snipe: L.layerGroup().addTo(map),
   avail: L.layerGroup(),
+  expired: L.layerGroup(),
   permits: L.layerGroup().addTo(map),
   apps: L.layerGroup(),
   blocks: L.layerGroup(),
@@ -170,6 +171,19 @@ function snipePopup(p) {
   return s;
 }
 
+function expiredPopup(p) {
+  const of = String(p.open_file || "").toLowerCase() === "yes"
+    ? "<br>📄 <b>Open-file</b> — <a href='https://data.nzpam.govt.nz/' " +
+      "target='_blank' rel='noopener'>NZP&amp;M data catalogue ↗</a>"
+    : "";
+  return `<b>⛏️ Relinquished — permit ${p.permit ?? "?"}</b><br>` +
+    `${p.title ?? ""}<br>` +
+    `Commodity: ${p.commodity ?? "?"} · ${p.region ?? ""}<br>` +
+    `Operator: ${p.operator ?? "?"}<br>` +
+    `Given up around: <b>${p.end_date ?? "?"}</b><br>` +
+    `<div style='max-width:260px'>${(p.summary || "").slice(0, 300)}</div>` + of;
+}
+
 function reportPopup(p) {
   const of = String(p.open_file || "").toLowerCase() === "yes"
     ? "<br>📄 <b>Open-file</b> — searchable in the " +
@@ -193,11 +207,15 @@ async function renderAvailable(bb) {
     return;
   }
   // ANY active permit blocks ground, so pull them all (no commodity/type filter).
-  const fc = await getJSON(`/api/permits?bbox=${bb}&mineral=all&permit_type=all`);
+  const [permitsFc, appsFc] = await Promise.all([
+    getJSON(`/api/permits?bbox=${bb}&mineral=all&permit_type=all`),
+    getJSON(`/api/applications?bbox=${bb}&mineral=all&permit_type=all`),
+  ]);
   const b = map.getBounds();
   let free = turf.bboxPolygon(
     [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
-  for (const f of fc.features) {
+  // Subtract active permits AND pending applications (don't chase applied-for land).
+  for (const f of [...permitsFc.features, ...appsFc.features]) {
     try {
       const diff = turf.difference(free, f);
       if (diff) free = diff; else { free = null; break; }
@@ -274,6 +292,16 @@ async function scan() {
       }));
     } else { layers.blocks.clearLayers(); }
 
+    if ($("lyrExpired").checked) {
+      jobs.push(getJSON(`/api/expired?bbox=${bb}&commodity=${c}`).then((fc) => {
+        layers.expired.clearLayers();
+        L.geoJSON(fc, { style: { color: "#b5651d", weight: 1.5,
+          fillColor: "#e8873b", fillOpacity: 0.18, dashArray: "5,4" },
+          onEachFeature: (f, l) => l.bindPopup(expiredPopup(f.properties)) })
+          .addTo(layers.expired);
+      }));
+    } else { layers.expired.clearLayers(); }
+
     if ($("lyrReports").checked) {
       jobs.push(getJSON(`/api/reports?bbox=${bb}&commodity=${c}`).then((fc) => {
         layers.reports.clearLayers();
@@ -301,6 +329,7 @@ function bindLayerToggle(id, group) {
   });
 }
 bindLayerToggle("lyrAvail", layers.avail);
+bindLayerToggle("lyrExpired", layers.expired);
 bindLayerToggle("lyrApps", layers.apps);
 bindLayerToggle("lyrBlocks", layers.blocks);
 bindLayerToggle("lyrReports", layers.reports);
