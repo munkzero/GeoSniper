@@ -114,6 +114,7 @@ button.primary:hover { filter: brightness(1.08); }
   width: 12px; height: 12px; border-radius: 3px; display: inline-block;
 }
 .sw.snipe { background: var(--open); }
+.sw.avail { background: #1e7a45; }
 .sw.permit { background: var(--permit); }
 .sw.app { background: var(--app); }
 .sw.block { background: var(--block); }

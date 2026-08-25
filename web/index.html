@@ -53,6 +53,8 @@
       <div class="toggles">
         <label><input type="checkbox" id="lyrSnipe" checked />
           <span class="sw snipe"></span> Snipe targets (historic drilling)</label>
+        <label><input type="checkbox" id="lyrAvail" />
+          <span class="sw avail"></span> Available ground (unclaimed)</label>
         <label><input type="checkbox" id="lyrPermits" checked />
           <span class="sw permit"></span> Active permits</label>
         <label><input type="checkbox" id="lyrApps" />
@@ -93,6 +95,7 @@
   <div id="loader" hidden><div class="spinner"></div><span>Scanning…</span></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

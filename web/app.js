@@ -24,6 +24,7 @@ L.tileLayer(
 
 const layers = {
   snipe: L.layerGroup().addTo(map),
+  avail: L.layerGroup(),
   permits: L.layerGroup().addTo(map),
   apps: L.layerGroup(),
   blocks: L.layerGroup(),
@@ -183,6 +184,33 @@ function reportPopup(p) {
     of;
 }
 
+/* ---------- available (unclaimed) ground ---------- */
+async function renderAvailable(bb) {
+  layers.avail.clearLayers();
+  if (map.getZoom() < 8) {
+    L.popup().setLatLng(map.getCenter())
+      .setContent("Zoom in a bit to compute available ground.").openOn(map);
+    return;
+  }
+  // ANY active permit blocks ground, so pull them all (no commodity/type filter).
+  const fc = await getJSON(`/api/permits?bbox=${bb}&mineral=all&permit_type=all`);
+  const b = map.getBounds();
+  let free = turf.bboxPolygon(
+    [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+  for (const f of fc.features) {
+    try {
+      const diff = turf.difference(free, f);
+      if (diff) free = diff; else { free = null; break; }
+    } catch (_) { /* skip malformed geometry */ }
+  }
+  if (free) {
+    L.geoJSON(free, {
+      style: { color: "#1e7a45", weight: 1, fillColor: "#2ecc71",
+        fillOpacity: 0.22, interactive: false },
+    }).addTo(layers.avail);
+  }
+}
+
 /* ---------- main scan ---------- */
 async function scan() {
   const bb = bbox();
@@ -207,6 +235,10 @@ async function scan() {
     } else {
       layers.snipe.clearLayers();
     }
+
+    if ($("lyrAvail").checked) {
+      jobs.push(renderAvailable(bb));
+    } else { layers.avail.clearLayers(); }
 
     if ($("lyrPermits").checked) {
       jobs.push(getJSON(`/api/permits?bbox=${bb}&mineral=${c}&permit_type=${permitType()}`).then((fc) => {
@@ -268,6 +300,7 @@ function bindLayerToggle(id, group) {
     scan();
   });
 }
+bindLayerToggle("lyrAvail", layers.avail);
 bindLayerToggle("lyrApps", layers.apps);
 bindLayerToggle("lyrBlocks", layers.blocks);
 bindLayerToggle("lyrReports", layers.reports);
