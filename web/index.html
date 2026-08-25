@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GeoSniper — NZ mineral permit finder</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="sidebar">
+    <header>
+      <h1>🎯 GeoSniper</h1>
+      <p class="tag">NZ mineral claim &amp; permit sniper · live NZP&amp;M data</p>
+    </header>
+
+    <div class="panel">
+      <label class="lbl">Search a place</label>
+      <div class="searchrow">
+        <input id="search" type="text"
+               placeholder="e.g. Lawrence, Golden Bay, Reefton" />
+        <button id="searchBtn">Go</button>
+      </div>
+      <div id="searchResults" class="results-mini"></div>
+      <div class="presets" id="presets"></div>
+    </div>
+
+    <div class="panel">
+      <label class="lbl">Commodity</label>
+      <select id="commodity">
+        <option value="Gold">Gold</option>
+        <option value="Silver">Silver</option>
+        <option value="Coal">Coal</option>
+        <option value="Iron">Iron sands</option>
+        <option value="all">All minerals</option>
+      </select>
+
+      <label class="lbl">Permit / claim type</label>
+      <select id="permitType">
+        <option value="all">All types</option>
+        <option value="mining">Mining permits &amp; licences (claims)</option>
+        <option value="exploration">Exploration permits</option>
+        <option value="prospecting">Prospecting permits</option>
+        <option value="fossicking">Gold fossicking areas</option>
+      </select>
+
+      <label class="lbl">Permit expiry window
+        <span id="expLabel">24 months</span></label>
+      <input id="expiring" type="range" min="3" max="120" step="3" value="24" />
+
+      <label class="lbl">Layers</label>
+      <div class="toggles">
+        <label><input type="checkbox" id="lyrSnipe" checked />
+          <span class="sw snipe"></span> Snipe targets (historic drilling)</label>
+        <label><input type="checkbox" id="lyrPermits" checked />
+          <span class="sw permit"></span> Active permits</label>
+        <label><input type="checkbox" id="lyrApps" />
+          <span class="sw app"></span> Pending applications</label>
+        <label><input type="checkbox" id="lyrBlocks" />
+          <span class="sw block"></span> Open / reserved blocks</label>
+        <label><input type="checkbox" id="lyrReports" />
+          <span class="sw report"></span> Historic reports</label>
+      </div>
+
+      <button id="loadBtn" class="primary">🔍 Scan this area</button>
+      <label class="auto"><input type="checkbox" id="autoload" checked />
+        auto-scan on map move</label>
+    </div>
+
+    <div class="panel" id="summaryPanel" hidden>
+      <div class="summary">
+        <div class="stat open"><b id="cOpen">0</b><span>OPEN</span></div>
+        <div class="stat expiring"><b id="cExp">0</b><span>EXPIRING</span></div>
+        <div class="stat covered"><b id="cCov">0</b><span>COVERED</span></div>
+      </div>
+      <p class="hint" id="scanHint"></p>
+    </div>
+
+    <div class="panel grow">
+      <label class="lbl">Opportunities <span id="oppCount"></span></label>
+      <div id="oppList" class="opplist"></div>
+    </div>
+
+    <footer>
+      Data: <a href="https://www.nzpam.govt.nz/" target="_blank"
+        rel="noopener">New Zealand Petroleum &amp; Minerals</a>.
+      Verify everything on the official NZP&amp;M webmaps before acting.
+    </footer>
+  </div>
+
+  <div id="map"></div>
+  <div id="loader" hidden><div class="spinner"></div><span>Scanning…</span></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
