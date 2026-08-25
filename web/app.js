@@ -16,7 +16,8 @@ const PRESETS = [
   { name: "All NZ", ll: NZ_CENTER, z: 6 },
 ];
 
-const map = L.map("map", { zoomControl: true }).setView(NZ_CENTER, 6);
+const map = L.map("map", { zoomControl: true, preferCanvas: true })
+  .setView(NZ_CENTER, 6);
 L.tileLayer(
   "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
   { attribution: "&copy; OpenStreetMap &copy; CARTO", maxZoom: 19 }
@@ -110,63 +111,63 @@ const oppList = $("oppList");
 function renderSnipe(fc) {
   layers.snipe.clearLayers();
   oppList.innerHTML = "";
-  const feats = fc.features
-    .sort((a, b) => rank(a.properties.status) - rank(b.properties.status));
   const colors = { open: "#2ecc71", expiring: "#f5a623", covered: "#7f8c9a" };
 
-  feats.forEach((f) => {
+  // One pin per goldfield (already aggregated + ranked by the backend).
+  fc.features.forEach((f) => {
     const p = f.properties;
     const [lon, lat] = f.geometry.coordinates;
+    const r = p.status === "covered" ? 5 : Math.min(6 + p.holes / 40, 16);
     L.circleMarker([lat, lon], {
-      radius: p.status === "covered" ? 3 : 5,
-      color: colors[p.status], weight: 1,
+      radius: r,
+      color: "#0d1117", weight: 1,
       fillColor: colors[p.status],
-      fillOpacity: p.status === "covered" ? 0.4 : 0.9,
+      fillOpacity: p.status === "covered" ? 0.45 : 0.85,
     }).bindPopup(snipePopup(p)).addTo(layers.snipe);
   });
 
-  // opportunity list: OPEN + EXPIRING first, grouped by prospect field.
-  const targets = feats.filter((f) => f.properties.status !== "covered");
+  // list only the actionable fields: OPEN + EXPIRING.
+  const targets = fc.features.filter((f) => f.properties.status !== "covered");
   $("oppCount").textContent = targets.length ? `(${targets.length})` : "";
   if (!targets.length) {
-    oppList.innerHTML = "<p class='hint'>No open or expiring historic ground " +
-      "in view. Try a wider expiry window, another commodity, or pan the map.</p>";
+    oppList.innerHTML = "<p class='hint'>No open or expiring gold ground in " +
+      "view. Widen the expiry window, switch commodity, or pan/zoom the map.</p>";
     return;
   }
-  targets.slice(0, 300).forEach((f) => {
+  targets.forEach((f) => {
     const p = f.properties;
     const [lon, lat] = f.geometry.coordinates;
     const el = document.createElement("div");
     el.className = "opp " + p.status;
     el.innerHTML =
-      `<div class='t'>${p.field || p.title || "drill hole"} ` +
+      `<div class='t'>${p.field} ` +
       `<span class='badge ${p.status}'>${p.status}</span></div>` +
-      `<div class='m'>${p.title || ""} · ${p.result || "result n/a"}` +
-      (p.depth_m ? ` · ${p.depth_m} m` : "") + "</div>" +
+      `<div class='m'>${p.holes} historic hole${p.holes > 1 ? "s" : ""}` +
+      ` · ${p.result}</div>` +
       `<div class='m'>` +
       (p.status === "open"
-        ? "No active permit over this historic drilling."
-        : `Under permit ${p.covering_permit} — ` +
-          `${fmtDays(p.covering_days_left)} (exp ${p.covering_expiry})`) +
+        ? `✅ ${p.open_holes} hole(s) on unclaimed ground.`
+        : `⏳ under permit ${p.covering_permit} — ${fmtDays(p.covering_days_left)}`) +
       `</div>`;
-    el.onclick = () => { map.setView([lat, lon], 15); };
+    el.onclick = () => { map.setView([lat, lon], 13); };
     oppList.appendChild(el);
   });
 }
-const rank = (s) => ({ open: 0, expiring: 1, covered: 2 }[s] ?? 3);
 
 function snipePopup(p) {
-  let s = `<b>${p.field || p.title}</b> — <b>${p.status.toUpperCase()}</b><br>` +
-    `Hole: ${p.title ?? "?"}<br>` +
-    `Result: ${p.result ?? "?"}${p.depth_m ? " · " + p.depth_m + " m" : ""}<br>` +
-    `Historic operator: ${p.hist_operator ?? "?"}<br>` +
-    `Historic permit: ${p.hist_permit ?? "?"}<br>`;
+  let s = `<b>${p.field}</b> — <b>${p.status.toUpperCase()}</b><br>` +
+    `${p.holes} historic drill hole(s) here<br>` +
+    `(${p.open_holes} unclaimed · ${p.expiring_holes} expiring · ` +
+    `${p.covered_holes} covered)<br>` +
+    `Sample result: ${p.result}<br>` +
+    `Last worked by: ${p.hist_operator ?? "?"}<br>`;
   if (p.status === "open") {
-    s += "✅ <b>No active permit here</b> — ground appears available.";
+    s += "✅ <b>Unclaimed</b> — no active permit over this old ground.";
+  } else if (p.status === "expiring") {
+    s += `⏳ Under permit <b>${p.covering_permit}</b>, ` +
+      `${fmtDays(p.covering_days_left)} (exp ${p.covering_expiry}).`;
   } else {
-    s += `Covered by permit <b>${p.covering_permit}</b><br>` +
-      `Expiry: ${p.covering_expiry} (${fmtDays(p.covering_days_left)})<br>` +
-      `Operator: ${p.covering_operator ?? "?"}`;
+    s += "Currently under an active permit.";
   }
   return s;
 }
@@ -230,7 +231,13 @@ async function renderAvailable(bb) {
 }
 
 /* ---------- main scan ---------- */
+let scanning = false;
+let rescanQueued = false;
+
 async function scan() {
+  // Never run two scans at once - queue one more if asked mid-scan.
+  if (scanning) { rescanQueued = true; return; }
+  scanning = true;
   const bb = bbox();
   const c = commodity();
   loader.hidden = false;
@@ -246,8 +253,9 @@ async function scan() {
         $("cExp").textContent = fc.summary.expiring;
         $("cCov").textContent = fc.summary.covered;
         $("scanHint").textContent =
-          `${fc.active_permits_in_view} active permits in view · ` +
-          `${fc.features.length} historic ${c} drill holes cross-referenced.`;
+          `${fc.summary.open + fc.summary.expiring} historic ${c} holes on ` +
+          `open/expiring ground · ${fc.fields} field(s) · ` +
+          `${fc.active_permits_in_view} active permits in view.`;
         renderSnipe(fc);
       }));
     } else {
@@ -318,6 +326,8 @@ async function scan() {
     $("summaryPanel").hidden = false;
   } finally {
     loader.hidden = true;
+    scanning = false;
+    if (rescanQueued) { rescanQueued = false; setTimeout(scan, 50); }
   }
 }
 
@@ -355,10 +365,18 @@ PRESETS.forEach((p) => {
   presetBox.appendChild(b);
 });
 
+let lastScanKey = "";
 map.on("moveend", () => {
   if (!$("autoload").checked) return;
+  // Skip if the view barely changed (avoids constant re-scanning).
+  const b = map.getBounds();
+  const key = [map.getZoom(),
+    b.getWest().toFixed(2), b.getSouth().toFixed(2),
+    b.getEast().toFixed(2), b.getNorth().toFixed(2)].join(",");
+  if (key === lastScanKey) return;
+  lastScanKey = key;
   clearTimeout(scanTimer);
-  scanTimer = setTimeout(scan, 500);
+  scanTimer = setTimeout(scan, 700);
 });
 
 // initial scan once tiles settle.

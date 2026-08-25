@@ -552,8 +552,10 @@ class Handler(BaseHTTPRequestHandler):
         dh_params.update(envelope(bbox))
         dh_data = arcgis_query(GEODATA_FS, L_DRILLHOLES, dh_params)
 
-        features = []
+        # 3) classify every hole, then AGGREGATE by prospect field so the map
+        #    shows one pin per goldfield instead of thousands of dots.
         counts = {"open": 0, "expiring": 0, "covered": 0}
+        groups = {}
         for f in dh_data.get("features", []):
             g = f.get("geometry") or {}
             lon, lat = g.get("x"), g.get("y")
@@ -563,39 +565,78 @@ class Handler(BaseHTTPRequestHandler):
             hit = point_in_permits(lon, lat, permits)
             if hit is None:
                 status = "open"
-                cover = None
             elif (hit["days_to_expiry"] is not None and
                   0 <= hit["days_to_expiry"] <= expiring_days):
                 status = "expiring"
-                cover = hit
             else:
                 status = "covered"
-                cover = hit
             counts[status] += 1
+
+            field = (a.get("Prospect_Field") or "Unnamed area").strip()
+            gr = groups.get(field)
+            if gr is None:
+                gr = groups[field] = {
+                    "field": field, "n": 0, "lon": 0.0, "lat": 0.0,
+                    "open": 0, "expiring": 0, "covered": 0,
+                    "sample_result": None, "hist_operator": a.get("Operator"),
+                    "hist_permit": a.get("Permit"),
+                    "cover_permit": None, "cover_expiry": None,
+                    "cover_days": None,
+                }
+            gr["n"] += 1
+            gr["lon"] += lon
+            gr["lat"] += lat
+            gr[status] += 1
+            res = a.get("Result_Public")
+            if res and res.lower() not in ("unknown", "", "none") and \
+                    not gr["sample_result"]:
+                gr["sample_result"] = res
+            if status == "expiring" and hit and gr["cover_permit"] is None:
+                gr["cover_permit"] = hit["permit"]
+                gr["cover_expiry"] = hit["expiry"]
+                gr["cover_days"] = hit["days_to_expiry"]
+
+        # rank a field by its best (most actionable) status.
+        def field_status(gr):
+            if gr["open"] > 0:
+                return "open"
+            if gr["expiring"] > 0:
+                return "expiring"
+            return "covered"
+
+        features = []
+        for gr in groups.values():
+            st = field_status(gr)
             features.append({
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "geometry": {"type": "Point",
+                             "coordinates": [gr["lon"] / gr["n"],
+                                             gr["lat"] / gr["n"]]},
                 "properties": {
-                    "status": status,
-                    "title": a.get("Title"),
-                    "field": a.get("Prospect_Field"),
-                    "result": a.get("Result_Public"),
-                    "depth_m": a.get("Total_Depth_Public"),
-                    "hist_permit": a.get("Permit"),
-                    "hist_operator": a.get("Operator"),
-                    "end_date": ms_to_iso(a.get("End_Date")),
-                    "covering_permit": cover["permit"] if cover else None,
-                    "covering_expiry": cover["expiry"] if cover else None,
-                    "covering_days_left": (cover["days_to_expiry"]
-                                           if cover else None),
-                    "covering_operator": cover["operator"] if cover else None,
+                    "status": st,
+                    "field": gr["field"],
+                    "holes": gr["n"],
+                    "open_holes": gr["open"],
+                    "expiring_holes": gr["expiring"],
+                    "covered_holes": gr["covered"],
+                    "result": gr["sample_result"] or "result not public",
+                    "hist_operator": gr["hist_operator"],
+                    "hist_permit": gr["hist_permit"],
+                    "covering_permit": gr["cover_permit"],
+                    "covering_expiry": gr["cover_expiry"],
+                    "covering_days_left": gr["cover_days"],
                 },
             })
+        # OPEN fields first, then EXPIRING, then by number of holes.
+        order = {"open": 0, "expiring": 1, "covered": 2}
+        features.sort(key=lambda ft: (order[ft["properties"]["status"]],
+                                      -ft["properties"]["holes"]))
 
         self._send_json({
             "type": "FeatureCollection",
             "features": features,
             "summary": counts,
+            "fields": len(features),
             "active_permits_in_view": len(permits),
             "expiring_days": expiring_days,
             "commodity": commodity,
